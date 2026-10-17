@@ -1,0 +1,4 @@
+<resources>
+  <string name="orbit_accessibility_label">Orbit · App limits</string>
+  <string name="orbit_accessibility_description">With your consent, Orbit checks only the name of the app opened and returns you to Home when one of your limits applies. It does not read messages, screens, keystrokes, videos, or page content. Everything remains on this device. You can turn this service off in Android Settings at any time.</string>
+</resources>

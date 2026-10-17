@@ -1,0 +1,5 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": { "modules": ["OrbitDeviceModule"] },
+  "android": { "modules": ["expo.modules.orbitdevice.OrbitDeviceModule"] }
+}

@@ -1,0 +1,57 @@
+# Platform capabilities and verification boundaries
+
+Orbit never converts app foreground sessions into video counts. The local native module lives in `modules/orbit-device`; its safe TypeScript facade is `src/services/device`. Web and Expo Go report unavailable capabilities and reject privileged operations instead of returning fabricated usage or fake success.
+
+## Implemented behavior
+
+| Capability | Android native build | iOS native build | Web |
+| --- | --- | --- | --- |
+| Foreground usage sessions | `UsageStatsManager.queryEvents`, after Usage Access | Not exposed to the JS analytics store | Unavailable |
+| Installed app discovery | Only four declared video-app packages | Apple's private Family Activity picker; no unrestricted discovery | Unavailable |
+| Individual video counts | Unavailable | Unavailable | Unavailable |
+| Native countdown | Ongoing notification with system chronometer, pause, resume and stop | Completion notification; optional ActivityKit widget | In-app timer only |
+| App restrictions | Explicitly consented AccessibilityService returns restricted apps to Home | ManagedSettings shields after signed monitor configuration and authorization | Unavailable |
+| Reboot recovery | Rules retained; Android restores an enabled accessibility service; unexpired notification restored on boot | OS-owned Device Activity monitoring; shared rules retained | Local records only |
+| Dynamic Island tied to another app's foreground | Not an Android API | Unsupported; never claimed | Unavailable |
+
+These are implemented code paths, not a claim that they have passed physical-device certification. The repository's final verification report and CI results determine what was actually compiled or executed. Apple extension targets need the steps in `modules/orbit-device/ios/Extensions/README.md`; they are not silently created or signed by prebuild.
+
+## Android usage and privacy
+
+The manifest requests `PACKAGE_USAGE_STATS`; opening settings does not grant it. Every read checks AppOps authorization and device-unlocked state. Revocation or temporarily unavailable history throws an error instead of producing misleading zero usage. Session reconstruction reacts to resumed/paused activities, another app coming to the foreground, screen-off, shutdown, and startup. A 24-hour lookback recovers boundary-crossing sessions, with a stable ID based on app and actual start. Repeated imports update an ongoing record instead of inserting duplicate views. Callers clip intervals to their report boundaries. A session means a foreground activity interval, not a video or an exact app-open count.
+
+Android retains detailed usage events for only a few days. Orbit can preserve only events that the OS still returns while Usage Access is granted. It cannot reconstruct already-pruned history, use from before a permission grant, OEM event omissions, browser playback, work-profile apps, cloned packages, or other versions of supported apps. Split-screen and multi-resume behavior can differ across devices; this implementation attributes one current foreground package at a time. It does not claim total device screen time across all apps. [Android UsageStatsManager](https://developer.android.com/reference/android/app/usage/UsageStatsManager), [Usage event definitions](https://developer.android.com/reference/android/app/usage/UsageEvents.Event).
+
+Package visibility uses individual `<queries>` declarations for `com.google.android.youtube`, `com.instagram.android`, `com.zhiliaoapp.musically`, and `com.facebook.katana`. The app does not request `QUERY_ALL_PACKAGES`. [Android package visibility](https://developer.android.com/training/package-visibility/declaring).
+
+## Android enforcement and explicit consent
+
+The app must show a prominent disclosure before `requestBlockingAccess(true)`: Orbit observes only the name of the opened app, and returns to Home when the user's own restriction applies. It does not read screens, messages, keystrokes, video titles or content. Consent is stored locally before the system accessibility page opens. The manifest declares `canRetrieveWindowContent=false`, `canPerformGestures=false` and `isAccessibilityTool=false`; the service receives window-state package changes only. Android's accessibility switch remains independently controlled by the user.
+
+The service reads persisted rules without JavaScript. It checks the active monitored app once per second, handles overnight schedules in device-local time, and unions overlapping restrictions. Daily allowances query measured sessions after local midnight with a five-second cache; this introduces a bounded polling delay in ordinary operation. Temporary restrictions use absolute Unix timestamps; scheduled windows use local calendar time and follow time-zone changes. Clock and timezone broadcasts invalidate daily usage caches. The system—not Orbit—reconnects a still-enabled service following reboot. No attempt is made to bypass a disabled service or force-stop.
+
+Blocking is an accessibility redirect to the Home screen, not an OS package suspension. A brief app frame can be visible before redirect, and device-specific battery limits, service interruption, multi-window mode, permission revocation, manual changes, uninstall or system controls can bypass it. No device-admin, broad overlay permission, or unrelated accessibility collection is used. Google Play distribution still requires the Accessibility API declaration, prominent disclosure, consent, store listing explanation and policy review; the code does not establish approval. [Android accessibility services](https://developer.android.com/guide/topics/ui/accessibility/views/service), [Google Play Accessibility API policy](https://support.google.com/googleplay/android-developer/answer/10964491).
+
+## Countdown notifications
+
+Android uses a low-importance notification channel and `POST_NOTIFICATIONS` runtime permission on Android 13+. The notification chronometer is rendered by the OS. Pause, resume, stop and expiration receiver actions persist state, and `getNativeCountdownState()` lets the JS timer reconcile when the app returns to foreground. `setTimeoutAfter` removes an unpaused countdown notification at expiry; an inexact alarm cleans persistent state. No per-second JS background loop, exact-alarm permission or foreground service is requested. The notification may still be dismissed or suppressed by the system. [Notification permission](https://developer.android.com/develop/ui/views/notifications/notification-permission), [Notification.Builder chronometer](https://developer.android.com/reference/android/app/Notification.Builder#setChronometerCountDown(boolean)).
+
+All native countdowns are user-started wall-clock timers of at most eight hours. They do not claim to pause automatically when leaving a video app. Android stores pause state; iOS exposes start and stop from the app and a scheduled completion reminder. Native notification actions do not mutate the JS database while the JS runtime is absent; the UI must reconcile returned native state before displaying the current timer.
+
+## Apple Screen Time
+
+The Swift module requests `.individual` authorization and displays `FamilyActivityPicker`. Opaque tokens stay in the shared, signed App Group and are never exported as package names, usage data or video counts. The default app configuration does not opt into Family Controls. Setting the plugin flag alone is insufficient: runtime blocking requires a reachable App Group and an embedded monitor extension with the expected extension point and bundle suffix, as well as user authorization. [Family Controls](https://developer.apple.com/documentation/familycontrols), [Entitlement request](https://developer.apple.com/documentation/familycontrols/requesting-the-family-controls-entitlement).
+
+The supplied Device Activity Monitor applies ManagedSettings shields for temporary, recurring and daily allowance rules and clears each named settings store independently. Temporary/recurring intervals require at least 15 minutes, and one recurring weekday consumes a monitored activity slot. The module validates the 20-registration limit before applying rules. Daily allowances require iOS 17.4+ to include earlier activity in the current scheduled day and aggregate all tokens in the chosen set. Calling with Android application IDs is rejected rather than silently shielding an unrelated selection. The UI still needs an iOS selection-specific editor to expose this optional route. [Device Activity](https://developer.apple.com/documentation/deviceactivity), [Minimum interval](https://developer.apple.com/documentation/deviceactivity/deviceactivitycenter/monitoringerror/intervaltooshort), [Prior activity in thresholds](https://developer.apple.com/documentation/deviceactivity/deviceactivityevent/includespastactivity).
+
+Schedule callbacks are delivered when the device is in use, not at guaranteed exact background times. Monitoring failures are reported; partial registrations are stopped and prior rules are restored where the OS permits. Changes to selection resynchronize the private token set. Test these behaviors on provisioned hardware before shipping. Apple requires the distribution entitlement on the host and the Screen Time extension's registered IDs. The correct monitor extension point is `com.apple.deviceactivity.monitor-extension`. [Monitor interval completion](https://developer.apple.com/documentation/deviceactivity/deviceactivitymonitor/intervaldidend(for:)), [Apple extension identifier guidance](https://developer.apple.com/forums/thread/819904).
+
+There is no unrestricted iOS foreground-app detection or usage-session database bridge here. A DeviceActivityReport extension could provide private on-device reports in a later implementation; its data should not be treated as arbitrary exportable analytics. No unsupported monitor, fabricated usage totals, or session estimates are injected into production records.
+
+## ActivityKit and Dynamic Island
+
+The supplied widget implements Lock Screen, compact, expanded and minimal presentations. A shared ActivityAttributes type connects the Expo bridge to ActivityKit. The host checks that the widget is actually embedded and Live Activities are allowed. The app starts activities in the foreground and uses SwiftUI's timer rendering; no remote push or backend is used. Expiration marks the content stale and the app ends expired activities on its next foreground. The OS controls presentation, duration and dismissal; there is no claim of exact background dismissal or foreground-conditioned display for other apps. Without the widget, the supported alternative is a completion notification. [ActivityKit](https://developer.apple.com/documentation/activitykit), [Displaying Live Activities](https://developer.apple.com/documentation/activitykit/displaying-live-data-with-live-activities).
+
+## Before distributing
+
+Run the Android permissions, lock/unlock, usage-session, app-switching, expiry, overnight, time-zone, restart and reboot scenarios on supported physical devices. Verify disabled notifications and revoked accessibility access remain visible in the UI. On iOS, configure, sign and embed both optional extensions before testing shields and Live Activities; default unsigned simulator validation cannot prove either capability. Never distribute an artifact as a verified blocker until these scenarios pass on the supported platform versions.

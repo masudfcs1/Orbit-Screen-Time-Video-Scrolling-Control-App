@@ -1,0 +1,15 @@
+// Applied only by release-android.sh after it validates signing inputs.
+// finalizeDsl runs after Expo's generated build file, which otherwise uses a
+// debug signing configuration for release. Never ship that default as a release.
+gradle.beforeProject { project ->
+    project.plugins.withId('com.android.application') {
+        project.extensions.getByName('androidComponents').finalizeDsl { android ->
+            def signing = android.signingConfigs.maybeCreate('orbitRelease')
+            signing.storeFile = project.file(System.getenv('ORBIT_ANDROID_KEYSTORE_PATH'))
+            signing.storePassword = System.getenv('ORBIT_ANDROID_KEYSTORE_PASSWORD')
+            signing.keyAlias = System.getenv('ORBIT_ANDROID_KEY_ALIAS')
+            signing.keyPassword = System.getenv('ORBIT_ANDROID_KEY_PASSWORD')
+            android.buildTypes.getByName('release').signingConfig = signing
+        }
+    }
+}

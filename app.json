@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Orbit",
+    "slug": "orbit",
+    "version": "1.0.0",
+    "scheme": "orbit",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "dev.orbit.screen",
+      "supportsTablet": true,
+      "buildNumber": "1"
+    },
+    "android": {
+      "package": "dev.orbit.screen",
+      "versionCode": 1
+    },
+    "web": {
+      "bundler": "metro",
+      "name": "Orbit — Make room for real life",
+      "themeColor": "#f7f8fa"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-sqlite",
+      "expo-document-picker",
+      "./modules/orbit-device/app.plugin.js"
+    ],
+    "experiments": {
+      "autolinkingModuleResolution": true
+    }
+  }
+}

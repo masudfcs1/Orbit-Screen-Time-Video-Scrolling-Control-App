@@ -1,0 +1,74 @@
+name: Android build on demand
+
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: Build variant (release requires signing secrets)
+        required: true
+        default: debug
+        type: choice
+        options: [debug, release]
+      format:
+        description: Artifact format (apk is fastest for testing/sideloading; bundle is for Play Store)
+        required: true
+        default: apk
+        type: choice
+        options: [apk, all, bundle]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - name: Prepare release signing
+        if: inputs.variant == 'release'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || { echo 'ANDROID_KEYSTORE_BASE64 is required for a release build.' >&2; exit 1; }
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/orbit-release.keystore"
+      - name: Build
+        env:
+          BUILD_VARIANT: ${{ inputs.variant }}
+          BUILD_FORMAT: ${{ inputs.format }}
+          ORBIT_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/orbit-release.keystore
+          ORBIT_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORBIT_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ORBIT_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ "$BUILD_VARIANT" == 'debug' ]]; then
+            bash scripts/release-android.sh --debug
+          elif [[ "$BUILD_FORMAT" == 'apk' ]]; then
+            bash scripts/release-android.sh --apk
+          elif [[ "$BUILD_FORMAT" == 'bundle' ]]; then
+            bash scripts/release-android.sh --bundle
+          else
+            bash scripts/release-android.sh --all
+          fi
+      - name: Remove temporary keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/orbit-release.keystore"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orbit-android-${{ inputs.variant }}-${{ github.sha }}
+          path: releases/android/
+          if-no-files-found: error
+          retention-days: 30

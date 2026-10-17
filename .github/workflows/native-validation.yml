@@ -1,0 +1,63 @@
+name: Native build validation
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - name: Build debug APK
+        run: bash scripts/release-android.sh --debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orbit-android-debug-${{ github.sha }}
+          path: |
+            releases/android/app-debug.apk
+            releases/android/android-debug-manifest.json
+          if-no-files-found: error
+          retention-days: 14
+
+  ios-simulator:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build unsigned iOS simulator app
+        run: bash scripts/validate-ios.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orbit-ios-simulator-${{ github.sha }}
+          path: |
+            releases/ios/Orbit-simulator.zip
+            releases/ios/ios-simulator-manifest.json
+          if-no-files-found: error
+          retention-days: 14
